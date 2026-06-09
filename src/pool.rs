@@ -25,6 +25,17 @@ impl ThreadPool {
             tx: Some(tx),
         }
     }
+
+    pub fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.tx
+            .as_ref()
+            .expect("pool is shutting down")
+            .send(Box::new(f))
+            .expect("workers have exited");
+    }
 }
 
 fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
