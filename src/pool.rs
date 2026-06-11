@@ -38,8 +38,19 @@ impl ThreadPool {
     }
 }
 
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        // Closing the channel makes recv() fail, so workers exit.
+        drop(self.tx.take());
+        for w in self.workers.drain(..) {
+            let _ = w.join();
+        }
+    }
+}
+
 fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
     loop {
+        // Lock only to receive, not while running the job.
         let job = rx.lock().unwrap().recv();
         match job {
             Ok(job) => job(),
