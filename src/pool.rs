@@ -58,3 +58,40 @@ fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runs_all_jobs() {
+        let n_workers = 4;
+        let n_jobs = 8;
+        let pool = ThreadPool::new(n_workers);
+
+        let (tx, rx) = channel();
+        for _ in 0..n_jobs {
+            let tx = tx.clone();
+            pool.execute(move || {
+                tx.send(1).unwrap();
+            });
+        }
+
+        assert_eq!(rx.iter().take(n_jobs).sum::<i32>(), 8);
+    }
+
+    #[test]
+    fn drop_joins_workers() {
+        let (tx, rx) = channel();
+        {
+            let pool = ThreadPool::new(2);
+            for _ in 0..16 {
+                let tx = tx.clone();
+                pool.execute(move || {
+                    tx.send(()).unwrap();
+                });
+            }
+        }
+        assert_eq!(rx.try_iter().count(), 16);
+    }
+}
