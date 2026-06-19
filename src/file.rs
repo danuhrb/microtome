@@ -47,3 +47,50 @@ impl SlideFile {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> SlideFile {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/smoke.svs");
+        SlideFile::open(path).unwrap()
+    }
+
+    #[test]
+    fn opens_and_reads_header() {
+        let f = fixture();
+        assert_eq!(f.len(), 255);
+        assert_eq!(f.slice(0, 4).unwrap(), b"II*\0");
+        assert_eq!(f.bytes()[..4], *b"II*\0");
+    }
+
+    #[test]
+    fn slice_bounds() {
+        let f = fixture();
+        assert!(f.slice(0, 255).is_ok());
+        assert!(f.slice(255, 0).is_ok());
+        assert!(f.slice(0, 256).is_err());
+        assert!(f.slice(250, 10).is_err());
+        assert!(f.slice(u64::MAX, 1).is_err());
+    }
+
+    #[test]
+    fn missing_file_errors() {
+        assert!(SlideFile::open("/nonexistent.svs").is_err());
+    }
+
+    #[test]
+    fn shared_across_threads() {
+        let f = std::sync::Arc::new(fixture());
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let f = f.clone();
+                std::thread::spawn(move || f.slice(0, 2).unwrap() == b"II")
+            })
+            .collect();
+        for h in handles {
+            assert!(h.join().unwrap());
+        }
+    }
+}
