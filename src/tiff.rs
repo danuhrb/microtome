@@ -47,3 +47,53 @@ impl fmt::Display for TiffError {
 }
 
 impl std::error::Error for TiffError {}
+
+type Result<T> = std::result::Result<T, TiffError>;
+
+pub mod field_type {
+    pub const BYTE: u16 = 1;
+    pub const ASCII: u16 = 2;
+    pub const SHORT: u16 = 3;
+    pub const LONG: u16 = 4;
+    pub const UNDEFINED: u16 = 7;
+    pub const LONG8: u16 = 16;
+}
+
+fn type_size(ty: u16) -> Option<usize> {
+    Some(match ty {
+        1 | 2 | 6 | 7 => 1,
+        3 | 8 => 2,
+        4 | 9 | 11 | 13 => 4,
+        5 | 10 | 12 | 16 | 17 | 18 => 8,
+        _ => return None,
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub tag: u16,
+    pub ty: u16,
+    pub count: u64,
+    /// Inline value or offset field, as raw bytes (4 used in classic, 8 in bigtiff).
+    raw: [u8; 8],
+}
+
+#[derive(Debug)]
+pub struct Ifd {
+    pub offset: u64,
+    pub entries: Vec<Entry>,
+}
+
+impl Ifd {
+    pub fn get(&self, tag: u16) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.tag == tag)
+    }
+}
+
+#[derive(Debug)]
+pub struct Tiff<'a> {
+    data: &'a [u8],
+    pub order: ByteOrder,
+    pub bigtiff: bool,
+    pub ifds: Vec<Ifd>,
+}
