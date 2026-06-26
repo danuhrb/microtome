@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 
 pub mod tags {
@@ -96,4 +97,77 @@ pub struct Tiff<'a> {
     pub order: ByteOrder,
     pub bigtiff: bool,
     pub ifds: Vec<Ifd>,
+}
+
+impl<'a> Tiff<'a> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
+        let order = match data.get(0..2) {
+            Some(b"II") => ByteOrder::Little,
+            Some(b"MM") => ByteOrder::Big,
+            Some(o) => return Err(TiffError::BadByteOrder([o[0], o[1]])),
+            None => return Err(TiffError::Truncated),
+        };
+        let mut tiff = Tiff {
+            data,
+            order,
+            bigtiff: false,
+            ifds: Vec::new(),
+        };
+        let magic = tiff.uint_at(2, 2)? as u16;
+        if magic != 42 {
+            return Err(TiffError::BadMagic(magic));
+        }
+        let mut next = tiff.uint_at(4, 4)?;
+        let mut seen = HashSet::new();
+        while next != 0 {
+            if !seen.insert(next) {
+                return Err(TiffError::CircularIfd(next));
+            }
+            let (ifd, n) = tiff.parse_ifd(next)?;
+            tiff.ifds.push(ifd);
+            next = n;
+        }
+        Ok(tiff)
+    }
+
+    fn parse_ifd(&self, offset: u64) -> Result<(Ifd, u64)> {
+        let count = self.uint_at(offset, 2)?;
+        let mut pos = offset + 2;
+        let mut entries = Vec::with_capacity(count.min(4096) as usize);
+        for _ in 0..count {
+            entries.push(self.parse_entry(pos)?);
+            pos += 12;
+        }
+        let next = self.uint_at(pos, 4)?;
+        Ok((Ifd { offset, entries }, next))
+    }
+
+    fn parse_entry(&self, pos: u64) -> Result<Entry> {
+        let tag = self.uint_at(pos, 2)? as u16;
+        let ty = self.uint_at(pos + 2, 2)? as u16;
+        let count = self.uint_at(pos + 4, 4)?;
+        let mut raw = [0u8; 8];
+        raw[..4].copy_from_slice(self.bytes_at(pos + 8, 4)?);
+        Ok(Entry { tag, ty, count, raw })
+    }
+
+    fn bytes_at(&self, offset: u64, len: usize) -> Result<&'a [u8]> {
+        usize::try_from(offset)
+            .ok()
+            .and_then(|start| start.checked_add(len).map(|end| (start, end)))
+            .and_then(|(start, end)| self.data.get(start..end))
+            .ok_or(TiffError::Truncated)
+    }
+
+    fn uint_at(&self, offset: u64, len: usize) -> Result<u64> {
+        Ok(self.read_uint(self.bytes_at(offset, len)?))
+    }
+
+    fn read_uint(&self, bytes: &[u8]) -> u64 {
+        let fold = |acc: u64, b: &u8| (acc << 8) | u64::from(*b);
+        match self.order {
+            ByteOrder::Little => bytes.iter().rev().fold(0, fold),
+            ByteOrder::Big => bytes.iter().fold(0, fold),
+        }
+    }
 }
