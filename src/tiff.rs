@@ -130,6 +130,38 @@ impl<'a> Tiff<'a> {
         Ok(tiff)
     }
 
+    /// The value of an entry as raw bytes, following the offset if not inline.
+    pub fn value_bytes<'b>(&'b self, e: &'b Entry) -> Result<&'b [u8]> {
+        let size = type_size(e.ty).ok_or(TiffError::UnsupportedType { tag: e.tag, ty: e.ty })?;
+        let total = usize::try_from(e.count)
+            .ok()
+            .and_then(|c| c.checked_mul(size))
+            .ok_or(TiffError::Truncated)?;
+        let inline = if self.bigtiff { 8 } else { 4 };
+        if total <= inline {
+            Ok(&e.raw[..total])
+        } else {
+            let offset = self.read_uint(&e.raw[..inline]);
+            self.bytes_at(offset, total)
+        }
+    }
+
+    /// All values of an unsigned integer entry (BYTE, SHORT, LONG, or LONG8).
+    pub fn uints(&self, e: &Entry) -> Result<Vec<u64>> {
+        use field_type::*;
+        if !matches!(e.ty, BYTE | SHORT | LONG | LONG8) {
+            return Err(TiffError::UnsupportedType { tag: e.tag, ty: e.ty });
+        }
+        let size = type_size(e.ty).unwrap();
+        let bytes = self.value_bytes(e)?;
+        Ok(bytes.chunks_exact(size).map(|c| self.read_uint(c)).collect())
+    }
+
+    /// The single value of an unsigned integer entry.
+    pub fn uint(&self, e: &Entry) -> Result<u64> {
+        self.uints(e)?.first().copied().ok_or(TiffError::Truncated)
+    }
+
     fn parse_ifd(&self, offset: u64) -> Result<(Ifd, u64)> {
         let count = self.uint_at(offset, 2)?;
         let mut pos = offset + 2;
