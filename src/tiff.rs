@@ -113,11 +113,18 @@ impl<'a> Tiff<'a> {
             bigtiff: false,
             ifds: Vec::new(),
         };
-        let magic = tiff.uint_at(2, 2)? as u16;
-        if magic != 42 {
-            return Err(TiffError::BadMagic(magic));
-        }
-        let mut next = tiff.uint_at(4, 4)?;
+        let mut next = match tiff.uint_at(2, 2)? as u16 {
+            42 => tiff.uint_at(4, 4)?,
+            43 => {
+                tiff.bigtiff = true;
+                let offset_size = tiff.uint_at(4, 2)? as u16;
+                if offset_size != 8 || tiff.uint_at(6, 2)? != 0 {
+                    return Err(TiffError::BadOffsetSize(offset_size));
+                }
+                tiff.uint_at(8, 8)?
+            }
+            m => return Err(TiffError::BadMagic(m)),
+        };
         let mut seen = HashSet::new();
         while next != 0 {
             if !seen.insert(next) {
@@ -162,24 +169,41 @@ impl<'a> Tiff<'a> {
         self.uints(e)?.first().copied().ok_or(TiffError::Truncated)
     }
 
+    /// An ASCII entry as a string, with trailing NULs removed.
+    pub fn ascii<'b>(&'b self, e: &'b Entry) -> Result<&'b str> {
+        if e.ty != field_type::ASCII {
+            return Err(TiffError::UnsupportedType { tag: e.tag, ty: e.ty });
+        }
+        let bytes = self.value_bytes(e)?;
+        let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+        std::str::from_utf8(&bytes[..end]).map_err(|_| TiffError::NotAscii(e.tag))
+    }
+
     fn parse_ifd(&self, offset: u64) -> Result<(Ifd, u64)> {
-        let count = self.uint_at(offset, 2)?;
-        let mut pos = offset + 2;
+        let (count, mut pos, entry_size) = if self.bigtiff {
+            (self.uint_at(offset, 8)?, offset + 8, 20)
+        } else {
+            (self.uint_at(offset, 2)?, offset + 2, 12)
+        };
         let mut entries = Vec::with_capacity(count.min(4096) as usize);
         for _ in 0..count {
             entries.push(self.parse_entry(pos)?);
-            pos += 12;
+            pos += entry_size;
         }
-        let next = self.uint_at(pos, 4)?;
+        let next = self.uint_at(pos, if self.bigtiff { 8 } else { 4 })?;
         Ok((Ifd { offset, entries }, next))
     }
 
     fn parse_entry(&self, pos: u64) -> Result<Entry> {
         let tag = self.uint_at(pos, 2)? as u16;
         let ty = self.uint_at(pos + 2, 2)? as u16;
-        let count = self.uint_at(pos + 4, 4)?;
+        let (count, value_pos, value_len) = if self.bigtiff {
+            (self.uint_at(pos + 4, 8)?, pos + 12, 8)
+        } else {
+            (self.uint_at(pos + 4, 4)?, pos + 8, 4)
+        };
         let mut raw = [0u8; 8];
-        raw[..4].copy_from_slice(self.bytes_at(pos + 8, 4)?);
+        raw[..value_len].copy_from_slice(self.bytes_at(value_pos, value_len)?);
         Ok(Entry { tag, ty, count, raw })
     }
 
@@ -203,3 +227,4 @@ impl<'a> Tiff<'a> {
         }
     }
 }
+
