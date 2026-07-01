@@ -228,3 +228,47 @@ impl<'a> Tiff<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(name: &str) -> Vec<u8> {
+        std::fs::read(format!("{}/{}", env!("CARGO_MANIFEST_DIR"), name)).unwrap()
+    }
+
+    #[test]
+    fn parses_smoke_svs() {
+        let data = load("smoke.svs");
+        let tiff = Tiff::parse(&data).unwrap();
+
+        assert_eq!(tiff.order, ByteOrder::Little);
+        assert!(!tiff.bigtiff);
+        assert_eq!(tiff.ifds.len(), 1);
+
+        let ifd = &tiff.ifds[0];
+        assert_eq!(ifd.entries.len(), 12);
+
+        let get = |tag| ifd.get(tag).unwrap();
+        assert_eq!(tiff.uint(get(tags::IMAGE_WIDTH)).unwrap(), 512);
+        assert_eq!(tiff.uint(get(tags::IMAGE_LENGTH)).unwrap(), 512);
+        assert_eq!(tiff.uints(get(tags::BITS_PER_SAMPLE)).unwrap(), [8, 8, 8]);
+        assert_eq!(tiff.uint(get(tags::COMPRESSION)).unwrap(), 7);
+        assert_eq!(tiff.uint(get(tags::PHOTOMETRIC_INTERPRETATION)).unwrap(), 6);
+        assert_eq!(tiff.uint(get(tags::SAMPLES_PER_PIXEL)).unwrap(), 3);
+        assert_eq!(tiff.uint(get(tags::TILE_WIDTH)).unwrap(), 256);
+        assert_eq!(tiff.uint(get(tags::TILE_LENGTH)).unwrap(), 256);
+        assert_eq!(
+            tiff.ascii(get(tags::IMAGE_DESCRIPTION)).unwrap(),
+            "Aperio|AppMag = 20|MPP = 0.4990|"
+        );
+        assert_eq!(
+            tiff.uints(get(tags::TILE_OFFSETS)).unwrap(),
+            [239, 243, 247, 251]
+        );
+        assert_eq!(tiff.uints(get(tags::TILE_BYTE_COUNTS)).unwrap(), [4, 4, 4, 4]);
+
+        let tables = tiff.value_bytes(get(tags::JPEG_TABLES)).unwrap();
+        assert_eq!(&tables[..2], b"\xff\xd8");
+        assert_eq!(&tables[8..], b"\xff\xd9");
+    }
+}
