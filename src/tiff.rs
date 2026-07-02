@@ -271,4 +271,32 @@ mod tests {
         assert_eq!(&tables[..2], b"\xff\xd8");
         assert_eq!(&tables[8..], b"\xff\xd9");
     }
+
+    #[test]
+    fn reads_tile_data() {
+        let data = load("smoke.svs");
+        let tiff = Tiff::parse(&data).unwrap();
+        let ifd = &tiff.ifds[0];
+        let offsets = tiff.uints(ifd.get(tags::TILE_OFFSETS).unwrap()).unwrap();
+        let counts = tiff.uints(ifd.get(tags::TILE_BYTE_COUNTS).unwrap()).unwrap();
+        for (off, count) in offsets.iter().zip(&counts) {
+            let tile = &data[*off as usize..(*off + *count) as usize];
+            assert_eq!(tile, b"ZZZZ");
+        }
+    }
+
+    #[test]
+    fn parses_test_tags_svs() {
+        let data = load("test_tags.svs");
+        let tiff = Tiff::parse(&data).unwrap();
+        let ifd = &tiff.ifds[0];
+        assert_eq!(
+            tiff.ascii(ifd.get(tags::IMAGE_DESCRIPTION).unwrap()).unwrap(),
+            "Aperio Fake|AppMag = 40|MPP = 0.2500|"
+        );
+        assert_eq!(
+            tiff.uints(ifd.get(tags::TILE_OFFSETS).unwrap()).unwrap(),
+            [244, 248, 252, 256]
+        );
+    }
 }
