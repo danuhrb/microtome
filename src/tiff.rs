@@ -299,4 +299,46 @@ mod tests {
             [244, 248, 252, 256]
         );
     }
+
+    #[test]
+    fn parses_bigtiff() {
+        let mut b = Vec::new();
+        b.extend(b"II");
+        b.extend(43u16.to_le_bytes());
+        b.extend(8u16.to_le_bytes());
+        b.extend(0u16.to_le_bytes());
+        b.extend(16u64.to_le_bytes());
+        b.extend(1u64.to_le_bytes());
+        b.extend(tags::IMAGE_WIDTH.to_le_bytes());
+        b.extend(field_type::LONG8.to_le_bytes());
+        b.extend(1u64.to_le_bytes());
+        b.extend(99_999u64.to_le_bytes());
+        b.extend(0u64.to_le_bytes());
+
+        let tiff = Tiff::parse(&b).unwrap();
+        assert!(tiff.bigtiff);
+        assert_eq!(tiff.ifds.len(), 1);
+        let e = tiff.ifds[0].get(tags::IMAGE_WIDTH).unwrap();
+        assert_eq!(tiff.uint(e).unwrap(), 99_999);
+    }
+
+    #[test]
+    fn parses_big_endian() {
+        let mut b = Vec::new();
+        b.extend(b"MM");
+        b.extend(42u16.to_be_bytes());
+        b.extend(8u32.to_be_bytes());
+        b.extend(1u16.to_be_bytes());
+        b.extend(tags::IMAGE_WIDTH.to_be_bytes());
+        b.extend(field_type::SHORT.to_be_bytes());
+        b.extend(1u32.to_be_bytes());
+        b.extend(512u16.to_be_bytes());
+        b.extend([0, 0]); // inline values are left-justified
+        b.extend(0u32.to_be_bytes());
+
+        let tiff = Tiff::parse(&b).unwrap();
+        assert_eq!(tiff.order, ByteOrder::Big);
+        let e = tiff.ifds[0].get(tags::IMAGE_WIDTH).unwrap();
+        assert_eq!(tiff.uint(e).unwrap(), 512);
+    }
 }
