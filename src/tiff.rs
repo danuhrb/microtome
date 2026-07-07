@@ -341,4 +341,30 @@ mod tests {
         let e = tiff.ifds[0].get(tags::IMAGE_WIDTH).unwrap();
         assert_eq!(tiff.uint(e).unwrap(), 512);
     }
+
+    #[test]
+    fn rejects_garbage() {
+        assert_eq!(Tiff::parse(b"").unwrap_err(), TiffError::Truncated);
+        assert_eq!(
+            Tiff::parse(b"XX\x2a\x00").unwrap_err(),
+            TiffError::BadByteOrder(*b"XX")
+        );
+        assert_eq!(Tiff::parse(b"II\x2c\x00").unwrap_err(), TiffError::BadMagic(44));
+        // Valid header, IFD offset past end of file.
+        assert_eq!(
+            Tiff::parse(b"II\x2a\x00\xff\x00\x00\x00").unwrap_err(),
+            TiffError::Truncated
+        );
+    }
+
+    #[test]
+    fn rejects_circular_ifd_chain() {
+        let mut b = Vec::new();
+        b.extend(b"II");
+        b.extend(42u16.to_le_bytes());
+        b.extend(8u32.to_le_bytes());
+        b.extend(0u16.to_le_bytes()); // zero entries
+        b.extend(8u32.to_le_bytes()); // next IFD points back to itself
+        assert_eq!(Tiff::parse(&b).unwrap_err(), TiffError::CircularIfd(8));
+    }
 }
