@@ -34,6 +34,8 @@ impl From<TiffError> for SvsError {
     }
 }
 
+type Result<T> = std::result::Result<T, SvsError>;
+
 #[derive(Debug)]
 pub struct Level {
     pub ifd_index: usize,
@@ -68,4 +70,36 @@ pub struct Slide<'a> {
     pub description: String,
     pub mpp: Option<f64>,
     pub magnification: Option<f64>,
+}
+
+impl<'a> Slide<'a> {
+    pub fn parse(data: &'a [u8]) -> Result<Self> {
+        let tiff = Tiff::parse(data)?;
+        let first = tiff.ifds.first().ok_or(SvsError::NoLevels)?;
+        let desc_entry = first
+            .get(tags::IMAGE_DESCRIPTION)
+            .ok_or(SvsError::NotAperio)?;
+        let description = tiff.ascii(desc_entry)?.to_owned();
+        if !description.contains("Aperio") {
+            return Err(SvsError::NotAperio);
+        }
+        let mpp = field(&description, "MPP");
+        let magnification = field(&description, "AppMag");
+
+        Ok(Slide {
+            tiff,
+            levels: Vec::new(),
+            description,
+            mpp,
+            magnification,
+        })
+    }
+}
+
+/// A numeric `key = value` field from an Aperio description string.
+fn field(desc: &str, key: &str) -> Option<f64> {
+    desc.split('|').find_map(|part| {
+        let (k, v) = part.split_once('=')?;
+        (k.trim() == key).then(|| v.trim().parse().ok())?
+    })
 }
