@@ -86,14 +86,61 @@ impl<'a> Slide<'a> {
         let mpp = field(&description, "MPP");
         let magnification = field(&description, "AppMag");
 
+        let mut levels = Vec::new();
+        for (i, ifd) in tiff.ifds.iter().enumerate() {
+            if ifd.get(tags::TILE_WIDTH).is_none() {
+                continue; // stripped image: thumbnail, label, or macro
+            }
+            if let Some(e) = ifd.get(tags::IMAGE_DESCRIPTION) {
+                if let Ok(d) = tiff.ascii(e) {
+                    if d.contains("label") || d.contains("macro") {
+                        continue;
+                    }
+                }
+            }
+            let offsets = tiff.uints(req(ifd, tags::TILE_OFFSETS)?)?;
+            let counts = tiff.uints(req(ifd, tags::TILE_BYTE_COUNTS)?)?;
+            if offsets.len() != counts.len() {
+                return Err(SvsError::TileCountMismatch {
+                    offsets: offsets.len(),
+                    counts: counts.len(),
+                });
+            }
+            levels.push(Level {
+                ifd_index: i,
+                width: tiff.uint(req(ifd, tags::IMAGE_WIDTH)?)?,
+                height: tiff.uint(req(ifd, tags::IMAGE_LENGTH)?)?,
+                tile_width: tiff.uint(req(ifd, tags::TILE_WIDTH)?)?,
+                tile_height: tiff.uint(req(ifd, tags::TILE_LENGTH)?)?,
+                compression: match ifd.get(tags::COMPRESSION) {
+                    Some(e) => tiff.uint(e)?,
+                    None => 1, // TIFF default: uncompressed
+                },
+                photometric: match ifd.get(tags::PHOTOMETRIC_INTERPRETATION) {
+                    Some(e) => tiff.uint(e)?,
+                    None => 6, // assume YCbCr, the common case for JPEG tiles
+                },
+                downsample: 1.0,
+                mpp: None,
+                tiles: offsets.into_iter().zip(counts).collect(),
+            });
+        }
+        if levels.is_empty() {
+            return Err(SvsError::NoLevels);
+        }
+
         Ok(Slide {
             tiff,
-            levels: Vec::new(),
+            levels,
             description,
             mpp,
             magnification,
         })
     }
+}
+
+fn req<'b>(ifd: &'b Ifd, tag: u16) -> Result<&'b Entry> {
+    ifd.get(tag).ok_or(SvsError::MissingTag(tag))
 }
 
 /// A numeric `key = value` field from an Aperio description string.
