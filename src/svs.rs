@@ -129,6 +129,13 @@ impl<'a> Slide<'a> {
             return Err(SvsError::NoLevels);
         }
 
+        levels.sort_by(|a, b| b.width.cmp(&a.width));
+        let (w0, h0) = (levels[0].width as f64, levels[0].height as f64);
+        for level in &mut levels {
+            level.downsample = (w0 / level.width as f64 + h0 / level.height as f64) / 2.0;
+            level.mpp = mpp.map(|m| m * level.downsample);
+        }
+
         Ok(Slide {
             tiff,
             levels,
@@ -136,6 +143,34 @@ impl<'a> Slide<'a> {
             mpp,
             magnification,
         })
+    }
+
+    /// Size of the base level in pixels.
+    pub fn dimensions(&self) -> (u64, u64) {
+        (self.levels[0].width, self.levels[0].height)
+    }
+
+    pub fn level_count(&self) -> usize {
+        self.levels.len()
+    }
+
+    /// The shared JPEG tables for a level, if its IFD has them.
+    pub fn jpeg_tables(&self, level: &Level) -> Option<&[u8]> {
+        let ifd = &self.tiff.ifds[level.ifd_index];
+        ifd.get(tags::JPEG_TABLES)
+            .and_then(|e| self.tiff.value_bytes(e).ok())
+    }
+
+    /// Index of the smallest level at least as fine as `target_mpp`.
+    pub fn best_level_for_mpp(&self, target_mpp: f64) -> usize {
+        let Some(base) = self.mpp else { return 0 };
+        let mut best = 0;
+        for (i, level) in self.levels.iter().enumerate() {
+            if base * level.downsample <= target_mpp * 1.0001 {
+                best = i;
+            }
+        }
+        best
     }
 }
 
@@ -150,3 +185,4 @@ fn field(desc: &str, key: &str) -> Option<f64> {
         (k.trim() == key).then(|| v.trim().parse().ok())?
     })
 }
+
