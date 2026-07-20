@@ -186,3 +186,93 @@ fn field(desc: &str, key: &str) -> Option<f64> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tiff::field_type;
+
+    fn load(name: &str) -> Vec<u8> {
+        std::fs::read(format!("{}/{}", env!("CARGO_MANIFEST_DIR"), name)).unwrap()
+    }
+
+    #[test]
+    fn parses_smoke_svs() {
+        let data = load("smoke.svs");
+        let slide = Slide::parse(&data).unwrap();
+
+        assert_eq!(slide.dimensions(), (512, 512));
+        assert_eq!(slide.level_count(), 1);
+        assert_eq!(slide.mpp, Some(0.499));
+        assert_eq!(slide.magnification, Some(20.0));
+
+        let level = &slide.levels[0];
+        assert_eq!(level.ifd_index, 0);
+        assert_eq!((level.tile_width, level.tile_height), (256, 256));
+        assert_eq!(level.compression, 7);
+        assert_eq!(level.downsample, 1.0);
+        assert_eq!(level.mpp, Some(0.499));
+        assert_eq!(level.tiles, [(239, 4), (243, 4), (247, 4), (251, 4)]);
+        assert_eq!((level.tiles_across(), level.tiles_down()), (2, 2));
+
+        let tables = slide.jpeg_tables(level).unwrap();
+        assert_eq!(&tables[..2], b"\xff\xd8");
+    }
+
+    #[test]
+    fn parses_test_tags_svs() {
+        let data = load("test_tags.svs");
+        let slide = Slide::parse(&data).unwrap();
+        assert_eq!(slide.mpp, Some(0.25));
+        assert_eq!(slide.magnification, Some(40.0));
+        assert_eq!(slide.description, "Aperio Fake|AppMag = 40|MPP = 0.2500|");
+    }
+
+    #[test]
+    fn rejects_non_aperio() {
+        let mut data = load("smoke.svs");
+        let pos = data.windows(6).position(|w| w == b"Aperio").unwrap();
+        data[pos] = b'X';
+        assert_eq!(Slide::parse(&data).unwrap_err(), SvsError::NotAperio);
+    }
+
+    fn entry(b: &mut Vec<u8>, tag: u16, ty: u16, count: u32, value: u32) {
+        b.extend(tag.to_le_bytes());
+        b.extend(ty.to_le_bytes());
+        b.extend(count.to_le_bytes());
+        b.extend(value.to_le_bytes());
+    }
+
+    /// Classic LE TIFF: base level 1024x768 and a 4x downsampled 256x192 level.
+    /// Layout: header 0..8, IFD0 8..98, IFD1 98..176, description at 176.
+    fn two_level_fixture() -> Vec<u8> {
+        use field_type::{ASCII, LONG, SHORT};
+        let desc = b"Aperio|AppMag = 20|MPP = 0.5|";
+
+        let mut b = Vec::new();
+        b.extend(b"II");
+        b.extend(42u16.to_le_bytes());
+        b.extend(8u32.to_le_bytes());
+
+        b.extend(7u16.to_le_bytes());
+        entry(&mut b, tags::IMAGE_WIDTH, LONG, 1, 1024);
+        entry(&mut b, tags::IMAGE_LENGTH, LONG, 1, 768);
+        entry(&mut b, tags::IMAGE_DESCRIPTION, ASCII, desc.len() as u32, 176);
+        entry(&mut b, tags::TILE_WIDTH, SHORT, 1, 256);
+        entry(&mut b, tags::TILE_LENGTH, SHORT, 1, 256);
+        entry(&mut b, tags::TILE_OFFSETS, LONG, 1, 0);
+        entry(&mut b, tags::TILE_BYTE_COUNTS, LONG, 1, 0);
+        b.extend(98u32.to_le_bytes());
+
+        b.extend(6u16.to_le_bytes());
+        entry(&mut b, tags::IMAGE_WIDTH, LONG, 1, 256);
+        entry(&mut b, tags::IMAGE_LENGTH, LONG, 1, 192);
+        entry(&mut b, tags::TILE_WIDTH, SHORT, 1, 256);
+        entry(&mut b, tags::TILE_LENGTH, SHORT, 1, 256);
+        entry(&mut b, tags::TILE_OFFSETS, LONG, 1, 0);
+        entry(&mut b, tags::TILE_BYTE_COUNTS, LONG, 1, 0);
+        b.extend(0u32.to_le_bytes());
+
+        b.extend(desc);
+        b
+    }
+}
