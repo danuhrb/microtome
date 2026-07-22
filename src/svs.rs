@@ -275,4 +275,25 @@ mod tests {
         b.extend(desc);
         b
     }
+
+    #[test]
+    fn discovers_pyramid_levels() {
+        let data = two_level_fixture();
+        let slide = Slide::parse(&data).unwrap();
+
+        assert_eq!(slide.dimensions(), (1024, 768));
+        assert_eq!(slide.level_count(), 2);
+        assert_eq!(slide.mpp, Some(0.5));
+
+        assert_eq!(slide.levels[0].downsample, 1.0);
+        assert_eq!(slide.levels[1].downsample, 4.0);
+        assert_eq!(slide.levels[1].mpp, Some(2.0));
+        assert_eq!(slide.levels[1].compression, 1);
+
+        assert_eq!(slide.best_level_for_mpp(0.5), 0);
+        assert_eq!(slide.best_level_for_mpp(1.0), 0);
+        assert_eq!(slide.best_level_for_mpp(2.0), 1);
+        assert_eq!(slide.best_level_for_mpp(100.0), 1);
+        assert_eq!(slide.best_level_for_mpp(0.1), 0);
+    }
 }
