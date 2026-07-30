@@ -1,6 +1,9 @@
 //! Tile decoders. CPU-only for now; the trait leaves room for a GPU backend.
 
 use std::fmt;
+use zune_core::bytestream::ZCursor;
+use zune_core::colorspace::ColorSpace;
+use zune_core::options::DecoderOptions;
 
 pub mod compression {
     pub const NONE: u64 = 1;
@@ -63,8 +66,26 @@ pub struct JpegTileDecoder {
 }
 
 impl Decoder for JpegTileDecoder {
-    fn decode(&self, _tile: &[u8], _tables: Option<&[u8]>, _out: &mut [u8]) -> Result<(usize, usize)> {
-        let _ = self.rgb;
-        Err(DecodeError::Jpeg("not implemented".into()))
+    fn decode(&self, tile: &[u8], tables: Option<&[u8]>, out: &mut [u8]) -> Result<(usize, usize)> {
+        let _ = tables;
+        let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
+        let mut decoder =
+            zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(tile), options);
+        decoder
+            .decode_headers()
+            .map_err(|e| DecodeError::Jpeg(e.to_string()))?;
+        let needed = decoder
+            .output_buffer_size()
+            .ok_or_else(|| DecodeError::Jpeg("image dimensions overflow".into()))?;
+        if out.len() < needed {
+            return Err(DecodeError::OutputTooSmall {
+                needed,
+                got: out.len(),
+            });
+        }
+        decoder
+            .decode_into(out)
+            .map_err(|e| DecodeError::Jpeg(e.to_string()))?;
+        Ok(decoder.dimensions().unwrap())
     }
 }
