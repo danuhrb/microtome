@@ -20,16 +20,19 @@ microtome reads these tiles. It reads many tiles at the same time.
 
 ---
 
+
+
 ## The problem
 
-Most software reads whole slide images with OpenSlide. OpenSlide is a good
+Most software reads whole slide images with OpenSlide. OpenSlide is an excellent
+
 library, but it has three limits:
 
 - OpenSlide decodes one tile for each read operation. It uses one thread.
 - You cannot safely share one file handle between threads. Thus each worker
-  process must open its own handle. Each handle keeps its own cache in memory.
+process must open its own handle. Each handle keeps its own cache in memory.
 - Many slides use JPEG 2000 compression. Free JPEG 2000 decoders are much
-  slower than JPEG decoders.
+slower than JPEG decoders.
 
 Because of these limits, a GPU can use tiles more quickly than the reader can
 supply them. The GPU stays idle for much of a training job.
@@ -44,20 +47,24 @@ microtome removes the need for this procedure.
 
 ---
 
+
+
 ## Functions
 
 - Reads many tiles at the same time with a thread pool.
 - Uses one file handle for all threads. Memory use does not increase with the
-  number of threads.
+number of threads.
 - Releases the Python global interpreter lock during a read operation.
 - Copies the pixel data one time only. The library writes the pixels directly
-  into the output array.
+into the output array.
 - Decodes JPEG tiles and JPEG 2000 tiles.
 - Gives the result as a NumPy array or as a PyTorch tensor.
 - Selects the resolution from the microns-per-pixel value, not from the
-  magnification label.
+magnification label.
 
 ---
+
+
 
 ## Installation
 
@@ -71,24 +78,30 @@ CMake. You do not need OpenSlide.
 
 Wheels are available for these systems:
 
-| System | Architecture |
-|---|---|
-| Linux | x86_64, aarch64 |
-| macOS | x86_64, arm64 |
-| Windows | x86_64 |
+
+| System  | Architecture    |
+| ------- | --------------- |
+| Linux   | x86_64, aarch64 |
+| macOS   | x86_64, arm64   |
+| Windows | x86_64          |
+
 
 The wheels support Python 3.10 and later versions.
 
 ---
 
+
+
 ## Usage
+
+
 
 ### Read one tile
 
 ```python
-import microtome
+import microtome as mt
 
-slide = microtome.open("CMU-1.svs")
+slide = mt.open("CMU-1.svs")
 
 print(slide.dimensions)        # (46000, 32914)
 print(slide.mpp)               # 0.499
@@ -97,6 +110,8 @@ print(slide.level_count)       # 3
 tile = slide.read_tile(x=12000, y=8000, size=256, mpp=0.5)
 print(tile.shape)              # (256, 256, 3)
 ```
+
+
 
 ### Read many tiles
 
@@ -111,6 +126,8 @@ batch = slide.read_batch(coords, size=256, mpp=0.5, threads=16)
 print(batch.shape)             # (N, 256, 256, 3)
 ```
 
+
+
 ### Find the tissue
 
 The `tissue_mask` function reads a low-resolution level and finds the tissue.
@@ -120,6 +137,8 @@ It returns the coordinates of the tiles that contain tissue.
 coords = slide.tissue_mask(size=256, mpp=0.5)
 print(len(coords))             # 9184
 ```
+
+
 
 ### Use the library with PyTorch
 
@@ -139,22 +158,28 @@ for batch in loader:
 
 ---
 
+
+
 ## Formats
 
-| Vendor | Extension | Condition |
-|---|---|---|
-| Aperio | `.svs` | Supported |
-| Generic tiled TIFF | `.tif` | Supported |
-| Hamamatsu | `.ndpi` | In development |
-| Leica | `.scn` | Planned |
-| Philips | `.tiff` | Planned |
-| Ventana | `.bif` | Planned |
-| MIRAX | `.mrxs` | Not planned |
+
+| Vendor             | Extension | Condition      |
+| ------------------ | --------- | -------------- |
+| Aperio             | `.svs`    | Supported      |
+| Generic tiled TIFF | `.tif`    | Supported      |
+| Hamamatsu          | `.ndpi`   | In development |
+| Leica              | `.scn`    | Planned        |
+| Philips            | `.tiff`   | Planned        |
+| Ventana            | `.bif`    | Planned        |
+| MIRAX              | `.mrxs`   | Not planned    |
+
 
 The first version reads Aperio SVS files only. This format is the most common
 format in public data sets. Other formats will come later.
 
 ---
+
+
 
 ## Speed
 
@@ -174,6 +199,8 @@ measurements.
 
 ---
 
+
+
 ## Correctness
 
 microtome compares its output with the output of OpenSlide. The test suite
@@ -188,16 +215,20 @@ tracker. Include the name of the file and the coordinates of the tile.
 
 ---
 
+
+
 ## Limits
 
 - The library reads images. It does not write images.
 - The library reads brightfield images only. It does not read fluorescence
-  images.
+images.
 - The library does not read the ICC profile. Color management is your task.
 - The library does not do stain normalization.
 - The Python API needs Python 3.10 or a later version.
 
 ---
+
+
 
 ## Build from source
 
@@ -207,8 +238,8 @@ for your system.
 
 ### What you need
 
-- A C++ compiler with support for C++17. Use GCC 11 or later, Clang 14 or
-  later, or MSVC 2022.
+- A C++compiler with support for C++17. Use GCC 11 or later, Clang 14 or
+later, or MSVC 2022.
 - CMake, version 3.20 or later.
 - Python 3.10 or later, with the development headers.
 - These libraries: libjpeg-turbo, OpenJPEG, libtiff, and zlib.
@@ -237,6 +268,8 @@ On Windows, use vcpkg:
 vcpkg install libjpeg-turbo openjpeg tiff zlib
 ```
 
+
+
 ### Build the Python module
 
 ```
@@ -254,6 +287,8 @@ To build with debug symbols, set this variable first:
 CMAKE_BUILD_TYPE=RelWithDebInfo pip install -e .
 ```
 
+
+
 ### Build the C++ library only
 
 Use this procedure if you do not need the Python module.
@@ -264,12 +299,16 @@ cmake --build build -j
 ctest --test-dir build
 ```
 
+
+
 ### Run the tests
 
 1. Download the test slides. Use the `scripts/get_testdata.py` script.
 2. Run `pytest tests/`.
 
 ---
+
+
 
 ## How to help
 
@@ -285,20 +324,26 @@ These tasks are open:
 
 ---
 
+
+
 ## Related software
 
-| Name | Description |
-|---|---|
-| OpenSlide | The C library that reads most vendor formats. |
-| cuCIM | A reader from NVIDIA that uses a GPU. |
-| tiffslide | A reader in Python for TIFF-based slides. |
-| libvips | A general library for large images. |
-| TIAToolbox | A tool set for computational pathology. |
+
+| Name       | Description                                   |
+| ---------- | --------------------------------------------- |
+| OpenSlide  | The C library that reads most vendor formats. |
+| cuCIM      | A reader from NVIDIA that uses a GPU.         |
+| tiffslide  | A reader in Python for TIFF-based slides.     |
+| libvips    | A general library for large images.           |
+| TIAToolbox | A tool set for computational pathology.       |
+
 
 microtome does not replace OpenSlide. OpenSlide reads more formats. Use
 microtome when you must read many tiles quickly from a supported format.
 
 ---
+
+
 
 ## License
 
