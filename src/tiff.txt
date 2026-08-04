@@ -1,0 +1,10 @@
+Bytes 0-1 ASCII | HEXADECIMAL :
+    II (4949.H)
+    MM (4D4D.H)
+
+Bytes 2-3:
+    42 -- TIFF Identifier, byte order depends on Bytes 0-1
+
+Bytes 4-7:
+    Offset (in bytes) of the first Image File Directory (IFD)
+
