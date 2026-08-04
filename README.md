@@ -52,6 +52,10 @@ microtome removes the need for this procedure.
 ## Functions
 
 - Reads many tiles at the same time with a thread pool.
+- Groups tiles that lie next to each other in the file into one read operation.
+A request for a hundred tiles becomes a few large reads instead of a hundred
+small ones. On object storage, where each read is an HTTP range request, this
+removes almost all of the waiting.
 - Uses one file handle for all threads. Memory use does not increase with the
 number of threads.
 - Releases the Python global interpreter lock during a read operation.
@@ -238,8 +242,11 @@ for your system.
 
 ### What you need
 
-- A C++compiler with support for C++17. Use GCC 11 or later, Clang 14 or
-later, or MSVC 2022.
+- A C++ compiler with support for C++23. The core uses
+`std::move_only_function`, so the standard library must define
+`__cpp_lib_move_only_function`. GCC 12 or later and MSVC 2022 17.2 or later
+provide it. libc++ provides it only from LLVM 22, and only with
+`-fexperimental-library`, so on macOS use GCC or a recent LLVM.
 - CMake, version 3.20 or later.
 - Python 3.10 or later, with the development headers.
 - These libraries: libjpeg-turbo, OpenJPEG, libtiff, and zlib.
