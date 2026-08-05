@@ -125,3 +125,70 @@ fn splice_tables(tile: &[u8], tables: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jpeg_encoder::{ColorType, Encoder, SamplingFactor};
+
+    fn gradient(w: usize, h: usize) -> Vec<u8> {
+        let mut px = Vec::with_capacity(w * h * 3);
+        for y in 0..h {
+            for x in 0..w {
+                px.push((x * 255 / w) as u8);
+                px.push((y * 255 / h) as u8);
+                px.push(128);
+            }
+        }
+        px
+    }
+
+    fn encode(pixels: &[u8], w: usize, h: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf, 100);
+        enc.set_sampling_factor(SamplingFactor::F_1_1);
+        enc.encode(pixels, w as u16, h as u16, ColorType::Rgb).unwrap();
+        buf
+    }
+
+    fn max_channel_diff(a: &[u8], b: &[u8]) -> u8 {
+        a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap()
+    }
+
+    #[test]
+    fn decodes_jpeg_tile() {
+        let (w, h) = (16, 16);
+        let pixels = gradient(w, h);
+        let jpeg = encode(&pixels, w, h);
+
+        let mut out = vec![0u8; w * h * 3];
+        let dims = JpegTileDecoder { rgb: false }.decode(&jpeg, None, &mut out).unwrap();
+        assert_eq!(dims, (w, h));
+        assert!(max_channel_diff(&pixels, &out) <= 8);
+    }
+
+    /// Split a full JPEG into a tables stream (DQT + DHT) and an abbreviated
+    /// tile stream, the way SVS files store them.
+    fn split_tables(jpeg: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let mut tables = SOI.to_vec();
+        let mut tile = SOI.to_vec();
+        let mut i = 2;
+        loop {
+            assert_eq!(jpeg[i], 0xff);
+            let marker = jpeg[i + 1];
+            if marker == 0xda {
+                tile.extend(&jpeg[i..]); // SOS and entropy data to end
+                break;
+            }
+            let len = u16::from_be_bytes([jpeg[i + 2], jpeg[i + 3]]) as usize;
+            let segment = &jpeg[i..i + 2 + len];
+            if marker == 0xdb || marker == 0xc4 {
+                tables.extend(segment);
+            } else {
+                tile.extend(segment);
+            }
+            i += 2 + len;
+        }
+        tables.extend(EOI);
+        (tables, tile)
+    }
+}
