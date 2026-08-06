@@ -191,4 +191,45 @@ mod tests {
         tables.extend(EOI);
         (tables, tile)
     }
+
+    #[test]
+    fn splices_shared_tables() {
+        let (w, h) = (16, 16);
+        let jpeg = encode(&gradient(w, h), w, h);
+        let (tables, tile) = split_tables(&jpeg);
+
+        let mut direct = vec![0u8; w * h * 3];
+        JpegTileDecoder { rgb: false }.decode(&jpeg, None, &mut direct).unwrap();
+
+        let mut spliced = vec![0u8; w * h * 3];
+        let dims = JpegTileDecoder { rgb: false }
+            .decode(&tile, Some(&tables), &mut spliced)
+            .unwrap();
+        assert_eq!(dims, (w, h));
+        assert_eq!(direct, spliced);
+
+        // Without the tables the abbreviated stream must not decode.
+        let mut out = vec![0u8; w * h * 3];
+        assert!(JpegTileDecoder { rgb: false }.decode(&tile, None, &mut out).is_err());
+    }
+
+    #[test]
+    fn rejects_small_output_buffer() {
+        let jpeg = encode(&gradient(16, 16), 16, 16);
+        let mut out = vec![0u8; 10];
+        assert_eq!(
+            JpegTileDecoder { rgb: false }.decode(&jpeg, None, &mut out).unwrap_err(),
+            DecodeError::OutputTooSmall {
+                needed: 16 * 16 * 3,
+                got: 10
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_compression() {
+        assert!(decoder_for(compression::JPEG, 6).is_ok());
+        let err = decoder_for(compression::APERIO_J2K_YCBCR, 6).err().unwrap();
+        assert_eq!(err, DecodeError::UnsupportedCompression(33003));
+    }
 }
