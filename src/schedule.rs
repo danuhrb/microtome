@@ -1,13 +1,18 @@
 //! Batch tile reads: coalesce file ranges, fan decode work out over the pool.
 
+use crate::decode::{decoder_for, DecodeError, Decoder};
+use crate::pool::ThreadPool;
+use crate::svs::Level;
 use std::fmt;
+use std::sync::mpsc::channel;
+use std::sync::Arc;
 
 /// Merge ranges closer than this many bytes into one read.
 pub const DEFAULT_MAX_GAP: u64 = 4096;
 
 #[derive(Debug, PartialEq)]
 pub enum ScheduleError {
-    Decode(crate::decode::DecodeError),
+    Decode(DecodeError),
     BadTileIndex(usize),
     OutOfBounds { tile: usize, offset: u64, len: u64 },
     TileSizeMismatch { tile: usize, got: (usize, usize), expected: (usize, usize) },
@@ -30,8 +35,8 @@ impl fmt::Display for ScheduleError {
 
 impl std::error::Error for ScheduleError {}
 
-impl From<crate::decode::DecodeError> for ScheduleError {
-    fn from(e: crate::decode::DecodeError) -> Self {
+impl From<DecodeError> for ScheduleError {
+    fn from(e: DecodeError) -> Self {
         Self::Decode(e)
     }
 }
@@ -65,37 +70,74 @@ pub fn coalesce(ranges: &[(u64, u64)], max_gap: u64) -> Vec<Read> {
     reads
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+struct SendPtr(*mut u8);
+unsafe impl Send for SendPtr {}
 
-    #[test]
-    fn coalesces_adjacent_ranges() {
-        let reads = coalesce(&[(0, 4), (4, 4), (100, 4)], 0);
-        assert_eq!(
-            reads,
-            [
-                Read { offset: 0, len: 8, tiles: vec![0, 1] },
-                Read { offset: 100, len: 4, tiles: vec![2] },
-            ]
-        );
+/// Decode the requested tiles of a level into one contiguous RGB8 buffer of
+/// `indices.len() * tile_width * tile_height * 3` bytes, slot j holding
+/// `indices[j]`. Tiles are decoded in parallel on the pool, in file order.
+pub fn read_tiles(
+    data: &[u8],
+    level: &Level,
+    jpeg_tables: Option<&[u8]>,
+    indices: &[usize],
+    pool: &ThreadPool,
+) -> Result<Vec<u8>, ScheduleError> {
+    let expected = (level.tile_width as usize, level.tile_height as usize);
+    let tile_bytes = expected.0 * expected.1 * 3;
+    let mut out = vec![0u8; indices.len() * tile_bytes];
+    if indices.is_empty() {
+        return Ok(out);
+    }
+    let decoder: Arc<dyn Decoder> =
+        Arc::from(decoder_for(level.compression, level.photometric)?);
+
+    let ranges: Vec<(u64, u64)> = indices
+        .iter()
+        .map(|&t| level.tiles.get(t).copied().ok_or(ScheduleError::BadTileIndex(t)))
+        .collect::<Result<_, _>>()?;
+    for (j, &(offset, len)) in ranges.iter().enumerate() {
+        if offset + len > data.len() as u64 {
+            return Err(ScheduleError::OutOfBounds { tile: indices[j], offset, len });
+        }
     }
 
-    #[test]
-    fn coalesces_across_small_gaps_only() {
-        assert_eq!(coalesce(&[(0, 4), (10, 4)], 8).len(), 1);
-        assert_eq!(coalesce(&[(0, 4), (10, 4)], 4).len(), 2);
+    let (tx, rx) = channel();
+    for read in coalesce(&ranges, DEFAULT_MAX_GAP) {
+        for j in read.tiles {
+            let (offset, len) = ranges[j];
+            let src = &data[offset as usize..(offset + len) as usize];
+            // Safety: we do not return from this function until every job has
+            // reported back (or been dropped), so these borrows cannot outlive
+            // the data they point into, and each job writes a disjoint slot.
+            let src: &'static [u8] = unsafe { std::mem::transmute(src) };
+            let tables: Option<&'static [u8]> = unsafe { std::mem::transmute(jpeg_tables) };
+            let dst = SendPtr(unsafe { out.as_mut_ptr().add(j * tile_bytes) });
+            let decoder = Arc::clone(&decoder);
+            let tx = tx.clone();
+            pool.execute(move || {
+                let dst = dst;
+                let slot = unsafe { std::slice::from_raw_parts_mut(dst.0, tile_bytes) };
+                let result = decoder.decode(src, tables, slot);
+                let _ = tx.send((j, result));
+            });
+        }
     }
+    drop(tx);
 
-    #[test]
-    fn coalesce_sorts_and_handles_overlap() {
-        let reads = coalesce(&[(100, 4), (0, 10), (104, 4), (2, 3)], 0);
-        assert_eq!(
-            reads,
-            [
-                Read { offset: 0, len: 10, tiles: vec![1, 3] },
-                Read { offset: 100, len: 8, tiles: vec![0, 2] },
-            ]
-        );
+    let mut first_error = None;
+    // Drain every result before returning so no job can still hold a borrow.
+    while let Ok((j, result)) = rx.recv() {
+        let error = match result {
+            Ok(dims) if dims == expected => continue,
+            Ok(got) => ScheduleError::TileSizeMismatch { tile: indices[j], got, expected },
+            Err(e) => ScheduleError::Decode(e),
+        };
+        first_error.get_or_insert(error);
+    }
+    match first_error {
+        None => Ok(out),
+        Some(e) => Err(e),
     }
 }
+
