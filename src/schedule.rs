@@ -292,4 +292,47 @@ mod tests {
         let pool = ThreadPool::new(2);
         assert!(read_tiles(&data, &slide.levels[0], None, &[], &pool).unwrap().is_empty());
     }
+
+    #[test]
+    fn rejects_bad_requests() {
+        let jpegs: Vec<_> = COLORS.iter().map(|&c| solid_jpeg(c)).collect();
+        let data = build_svs(&jpegs, 7);
+        let slide = Slide::parse(&data).unwrap();
+        let level = &slide.levels[0];
+        let pool = ThreadPool::new(2);
+
+        assert_eq!(
+            read_tiles(&data, level, None, &[7], &pool).unwrap_err(),
+            ScheduleError::BadTileIndex(7)
+        );
+
+        let truncated = &data[..data.len() - 10];
+        assert!(matches!(
+            read_tiles(truncated, level, None, &[3], &pool).unwrap_err(),
+            ScheduleError::OutOfBounds { tile: 3, .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_unsupported_compression() {
+        let jpegs: Vec<_> = COLORS.iter().map(|&c| solid_jpeg(c)).collect();
+        let data = build_svs(&jpegs, 33003);
+        let slide = Slide::parse(&data).unwrap();
+        let pool = ThreadPool::new(2);
+        assert_eq!(
+            read_tiles(&data, &slide.levels[0], None, &[0], &pool).unwrap_err(),
+            ScheduleError::Decode(DecodeError::UnsupportedCompression(33003))
+        );
+    }
+
+    #[test]
+    fn corrupt_tile_reports_error_after_draining() {
+        let mut jpegs: Vec<_> = COLORS.iter().map(|&c| solid_jpeg(c)).collect();
+        jpegs[2] = vec![0xff; 40]; // not a JPEG
+        let data = build_svs(&jpegs, 7);
+        let slide = Slide::parse(&data).unwrap();
+        let pool = ThreadPool::new(4);
+        let err = read_tiles(&data, &slide.levels[0], None, &[0, 1, 2, 3], &pool).unwrap_err();
+        assert!(matches!(err, ScheduleError::Decode(DecodeError::Jpeg(_))));
+    }
 }
