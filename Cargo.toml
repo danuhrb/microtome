@@ -3,10 +3,18 @@ name = "microtome"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 memmap2 = "0.9.11"
+numpy = { version = "0.29.0", optional = true }
+pyo3 = { version = "0.29.2", features = ["extension-module"], optional = true }
 zune-core = "0.5.3"
 zune-jpeg = "0.5.15"
 
 [dev-dependencies]
 jpeg-encoder = "0.7.1"
+
+[features]
+python = ["dep:pyo3", "dep:numpy"]
