@@ -233,7 +233,7 @@ mod tests {
     use super::*;
 
     fn load(name: &str) -> Vec<u8> {
-        std::fs::read(format!("{}/{}", env!("CARGO_MANIFEST_DIR"), name)).unwrap()
+        std::fs::read(format!("{}/tests/data/{}", env!("CARGO_MANIFEST_DIR"), name)).unwrap()
     }
 
     #[test]

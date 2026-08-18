@@ -1,3 +1,4 @@
 /data
 /target
 *.svs
+!tests/data/*.svs

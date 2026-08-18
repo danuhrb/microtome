@@ -53,7 +53,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> SlideFile {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/smoke.svs");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/smoke.svs");
         SlideFile::open(path).unwrap()
     }
 
