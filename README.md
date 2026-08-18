@@ -12,12 +12,14 @@ releases the Python global interpreter lock during a read operation.
 ## Installation
 
 ```
-pip install microtome
+pip install microtome-wsi
 ```
 
 This command gets a prebuilt wheel. You do not need a compiler. You do not
 need OpenSlide. The wheels support Python 3.10 and later versions on Linux
 (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64).
+
+The package name is `microtome-wsi`. The import name is `microtome`.
 
 ---
 

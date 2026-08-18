@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "microtome"
+name = "microtome-wsi"
 version = "0.1.0"
 description = "Fast parallel tile reader for whole slide images"
 requires-python = ">=3.10"
